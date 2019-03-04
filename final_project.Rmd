@@ -1,0 +1,365 @@
+---
+title: "stat101C_final_project"
+author: "GAMMA"
+date: "8/2/2018"
+output: html_document
+---
+
+# Functions...
+```{r}
+rm(list = ls())
+library(tidyr)
+
+Drop_Unrelated <- function(data){  # they have no relationship with Y
+  drops <- c("Ob", "EMPLOYER_BUSINESS_DBA", "EMPLOYER_ADDRESS", "EMPLOYER_CITY", "EMPLOYER_POSTAL_CODE", "EMPLOYER_COUNTRY", "EMPLOYER_PROVINCE", "EMPLOYER_PHONE", "EMPLOYER_PHONE_EXT", "AGENT_ATTORNEY_NAME", "AGENT_ATTORNEY_CITY", "JOB_TITLE", "SOC_CODE", "NAICS_CODE", "PW_SOURCE_OTHER", "PUBLIC_DISCLOSURE_LOCATION", "WORKSITE_CITY", "WORKSITE_COUNTY", "WORKSITE_POSTAL_CODE", "ORIGINAL_CERT_DATE")
+  data <- data[, !(names(data) %in% drops)] 
+  return(data)
+}
+
+Drop_too_much_missing <- function(data){  # too much missing values 
+  drops <- c("AGENT_ATTORNEY_STATE", "SUPPORT_H1B", "LABOR_CON_AGREE")  # , "PW_WAGE_LEVEL"
+  data <- data[, !(names(data) %in% drops)] 
+  return(data)
+}
+
+Change_unit_of_pay <- function(data, change_col, unit){  
+  # levels: Bi-Weekly Hour Month Week Year 
+  # Hour to year 
+  hr_index <- which(unit == "Hour")
+  hr_to_yr <- change_col[hr_index] * 52 * 40
+  change_col[hr_index] <- hr_to_yr
+
+  # Week to year 
+  week_index <- which(unit == "Week")
+  week_to_yr <- change_col[week_index] * 52
+  change_col[week_index] <- week_to_yr
+
+  # Bi-Weekly to year 
+  biweek_index <- which(unit == "Bi-Weekly")
+  biweek_to_yr <- change_col[biweek_index] * 26
+  change_col[biweek_index] <- biweek_to_yr
+
+  # Month to year
+  month_index <- which(unit == "Month")
+  month_to_yr <- change_col[month_index] * 12
+  change_col[month_index] <- month_to_yr
+  return(change_col)
+}
+
+Date_to_days <- function(data, start_date, end_date, newcol){  # newcol will be the days between the start date and end date
+  newcol <- as.Date(as.character(end_date),format="%m/%d/%Y")-as.Date(as.character(start_date), format="%m/%d/%Y")
+  range(as.Date(as.character(end_date), format="%m/%d/%Y")-as.Date(as.character(start_date), format="%m/%d/%Y"))
+  return(newcol)
+}
+
+Change_empty_to_NA <- function(the_col){
+  index <- which(the_col=="")
+  the_col[index] <- NA
+  return(the_col)
+}
+
+Change_state_group <- function(data, col){
+  index_west <- which(col=="WA"|col=="OR"|col=="CA"|col=="MT"|col=="WY"|col=="ID"|col=="NV"|col=="UT"|col=="CO"|col=="AZ"|col=="NM"|col=="AK"|col=="HI"|col=="GU"|col=="MP"|col=="PR"|col=="VI")
+  index_midwest <- which(col=="ND"|col=="SD"|col=="NE"|col=="KS"|col=="MN"|col=="IA"|col=="MO"|col=="WI"|col=="IL"|col=="MI"|col=="IN"|col=="OH")
+  index_northeast <- which(col=="NH"|col=="VT"|col=="ME"|col=="MA"|col=="RI"|col=="CT"|col=="NJ"|col=="NY"|col=="PA")
+  index_south <- which(col=="OK"|col=="TX"|col=="AR"|col=="LA"|col=="MS"|col=="AL"|col=="TN"|col=="KY"|col=="FL"|col=="GA"|col=="SC"|col=="NC"|col=="VA"|col=="WV"|col=="DE"|col=="MD"|col=="DC")
+  col <- rep(NA, nrow(data))
+  col[index_west] <- "west"
+  col[index_midwest] <- "midwest"
+  col[index_northeast] <- "northeast"
+  col[index_south] <- "south"
+  col <- as.factor(col)
+  return(col)
+}
+
+Data_Processing <- function(data, model){ # model: which model you want to build
+  # ther have no relationship with Y
+  data <- Drop_Unrelated(data)
+  dim(data)
+  # too much missing values 
+  data <- Drop_too_much_missing(data)
+  dim(data)
+  # WAGE_RATE_OF_PAY_FROM Conversion
+  data$WAGE_RATE_OF_PAY_FROM <- Change_unit_of_pay(data, data$WAGE_RATE_OF_PAY_FROM, data$WAGE_UNIT_OF_PAY)
+  # WAGE_RATE_OF_PAY_TO Conversion
+  data$WAGE_RATE_OF_PAY_TO <- Change_unit_of_pay(data, data$WAGE_RATE_OF_PAY_TO, data$WAGE_UNIT_OF_PAY)
+  dim(data)
+  
+  # change 0 to max(data$WAGE_RATE_OF_PAY_FROM)
+  index <- which(data$WAGE_RATE_OF_PAY_TO == 0)
+  data$WAGE_RATE_OF_PAY_TO[index] <- max(data$WAGE_RATE_OF_PAY_FROM)
+  dim(data)
+  
+  drops <- c("WAGE_UNIT_OF_PAY")   # don't need this col
+  data <- data[, !(names(data) %in% drops)] 
+  
+  #"PW_UNIT_OF_PAY"
+  if(nrow(data) != 2093){
+    data$PW_UNIT_OF_PAY <- Change_empty_to_NA(data$PW_UNIT_OF_PAY)
+    # delete NAs
+    data <- data[complete.cases(data), ]
+  }
+  
+  #"PREVAILING_WAGE" Conversion
+  data$PREVAILING_WAGE <- Change_unit_of_pay(data, data$PREVAILING_WAGE, data$PW_UNIT_OF_PAY)
+  
+  # delete this col (already used)
+  drops <- c("PW_UNIT_OF_PAY")  
+  data <- data[, !(names(data) %in% drops)] 
+  
+  ## Duratoion of process day
+  data$Duration_Process <- Date_to_days(data, start_date = data$CASE_SUBMITTED, end_date = data$DECISION_DATE, newcol = Duration_Process)
+
+  ## Employment duration
+  data$Duration_Employment <- Date_to_days(data, start_date = data$EMPLOYMENT_START_DATE, end_date = data$EMPLOYMENT_END_DATE, newcol = Duration_Employment)
+  
+  # delete these cols  don't need them (already used)
+  drops <- c("CASE_SUBMITTED", "DECISION_DATE", "EMPLOYMENT_START_DATE", "EMPLOYMENT_END_DATE")
+  data <- data[, !(names(data)%in%drops)] 
+  
+  # WILLFUL_VIOLATOR
+  index <- which(data$WILLFUL_VIOLATOR == "")
+  n <- length(index)
+  x <- rnorm(n)
+  data$WILLFUL_VIOLATOR[index[which(x < 0)]] <- "Y"
+  data$WILLFUL_VIOLATOR[index[which(x >= 0)]] <- "N"
+  #num_N <- length(which(data$WILLFUL_VIOLATOR == "N"))  #4762
+  #num_Y <- dim(data)[1] - num_N  #156
+  
+  # AGENT_REPRESENTING_EMPLOYER 
+  index <- which(data$AGENT_REPRESENTING_EMPLOYER == "")
+  n <- length(index)
+  x <- sample(c(-1, 1), n, replace = T, prob = c(0.66, 0.34))
+  data$AGENT_REPRESENTING_EMPLOYER[index[which(x < 0)]] <- "Y"
+  data$AGENT_REPRESENTING_EMPLOYER[index[which(x > 0)]] <- "N"
+  
+  if(model == 2){
+    # total workers
+    index <- which(data$TOTAL_WORKERS == 1)
+    data$TOTAL_WORKERS[-index] <- 2
+    data$TOTAL_WORKERS <- as.factor(c("1" = data$TOTAL_WORKERS[index], "2" = data$TOTAL_WORKERS[-index]))
+  }else{
+    drops <- c("TOTAL_WORKERS")
+    data <- data[, !(names(data) %in% drops)] 
+  }
+  
+  if(nrow(data) != 2093){
+    # change missing values to NAs
+    data$H1B_DEPENDENT <- Change_empty_to_NA(data$H1B_DEPENDENT)
+    data$WORKSITE_STATE <- Change_empty_to_NA(data$WORKSITE_STATE)
+    # delete NAs
+    data <- data[complete.cases(data),]
+  }
+  dim(data)
+  data$WORKSITE_STATE <- Change_state_group(data, data$WORKSITE_STATE)
+  data$EMPLOYER_STATE <- Change_state_group(data, data$EMPLOYER_STATE)
+  
+  # change SOC_NAME group
+  data$occ<-NA
+  data$occ[grep("engineer",data$SOC_NAME, ignore.case = T)]<-"ENGINEER"
+  data$occ[grep("manager",data$SOC_NAME, ignore.case = T)]<-"MANAGER"
+  data$occ[grep("technician",data$SOC_NAME, ignore.case = T)]<-"TECHNICIAN"
+  data$occ[grep("teacher",data$SOC_NAME, ignore.case = T)]<-"TEACHER"
+  data$occ[grep("executive",data$SOC_NAME, ignore.case = T)]<-"EXECUTIVE"
+  data$occ[grep("accountant",data$SOC_NAME, ignore.case = T)]<-"ACCOUNTANT"
+  data$occ[grep("analyst",data$SOC_NAME, ignore.case = T)]<-"ANALYST"
+  data$occ[grep("programmer",data$SOC_NAME, ignore.case = T)]<-"PROGRAMMER"
+  data$occ[grep("software developer",data$SOC_NAME, ignore.case = T)]<-"SOFTWARE DEVELOPER"
+  data$occ[grep("scientist",data$SOC_NAME, ignore.case = T)]<-"SCIENTIST"
+  data$occ[grep("assistant",data$SOC_NAME, ignore.case = T)]<-"ASSISTANT"
+  data$occ[grep("architect",data$SOC_NAME, ignore.case = T)]<-"ARCHITECT"
+  data$occ[which(is.na(data$occ)==TRUE)] <- "others"
+  data$SOC_NAME <- data$occ
+  data$occ <- NULL  # delete this col
+  data$SOC_NAME <- as.factor(data$SOC_NAME)
+  dim(data)
+  return(data)
+}
+
+```
+
+
+
+# best_model_1
+```{r, warning=FALSE}
+data <- read.csv("TrainH1BLast.csv")
+# str(data)
+# dim(data)   # 4918   52
+data <- data[-1667, ]  # bad data  
+# separate the data into training data and testing data set
+4917 * 0.8   # 3933.6  
+set.seed(9999)
+i_train <- sample(1:4917, 3934, replace = F)
+data_test <- data[-i_train,]
+data_train <- data[i_train, ]
+# dim(data_train)   # 3934  52
+# call Data_Processing function 
+data_train <- Data_Processing(data_train, model = 1)
+# dim(data_train)  # 3819  25
+
+# delete
+drops <- c("VISA_CLASS", "EMPLOYER_NAME","TOTAL_WORKERS", "NEW_EMPLOYMENT", "CONTINUED_EMPLOYMENT", "CHANGE_PREVIOUS_EMPLOYMENT", "NEW_CONCURRENT_EMPLOYMENT", "CHANGE_EMPLOYER", "AMENDED_PETITION", "FULL_TIME_POSITION", "PW_WAGE_LEVEL", "WILLFUL_VIOLATOR")
+data_train <- data_train[, !(names(data_train)%in%drops)]
+# dim(data_train)  # 3819  13   # 1_Y ~ 10_X + 2new_col
+
+#str(data_test)
+data_test <- Data_Processing(data_test, model = 1)
+drops <- c("VISA_CLASS", "EMPLOYER_NAME","TOTAL_WORKERS", "NEW_EMPLOYMENT", "CONTINUED_EMPLOYMENT", "CHANGE_PREVIOUS_EMPLOYMENT", "NEW_CONCURRENT_EMPLOYMENT", "CHANGE_EMPLOYER", "AMENDED_PETITION", "FULL_TIME_POSITION", "PW_WAGE_LEVEL", "WILLFUL_VIOLATOR")
+data_test <- data_test[, !(names(data_test)%in%drops)]
+# dim(data_test)  # 944  13
+
+```
+
+
+# building model--------
+# 88.516%
+# missing: (63 + 49)/944    0.1186441
+```{r}
+library(gbm)
+
+data_train$Duration_Process <- as.numeric(data_train$Duration_Process)
+data_train$Duration_Employment <- as.numeric(data_train$Duration_Employment)
+data_train$CASE_STATUS <- as.numeric(data_train$CASE_STATUS) - 1
+
+bag.h1b_1 <- gbm(CASE_STATUS ~ EMPLOYER_STATE + AGENT_REPRESENTING_EMPLOYER + SOC_NAME + PREVAILING_WAGE + PW_SOURCE + PW_SOURCE_YEAR + WAGE_RATE_OF_PAY_FROM + WAGE_RATE_OF_PAY_TO + H1B_DEPENDENT  + WORKSITE_STATE + Duration_Process + Duration_Employment , data = data_train, distribution = "bernoulli", n.trees = 100, interaction.depth = 12)
+summary(bag.h1b_1)[2]
+names(bag.h1b_1)
+bag.h1b_1$var.names
+
+data_test$Duration_Process <- as.numeric(data_test$Duration_Process)
+data_test$Duration_Employment <- as.numeric(data_test$Duration_Employment)
+data_test$CASE_STATUS <- as.numeric(data_test$CASE_STATUS)
+
+# testing------------
+yhat.bag <- ifelse(predict(bag.h1b_1, newdata = data_test, n.trees = 100,type="response") < 0.5, "CERTIFIED", "DENIED")
+summary(yhat.bag)
+table <- table(data_test$CASE_STATUS, yhat.bag)
+table
+
+```
+
+
+
+# model = 2
+# "Predict_14.csv"  # 88.995%
+# Total workers to level "1" and level "2"
+# missing: (64 + 48)/944   0.1186441
+```{r}
+data <- read.csv("TrainH1BLast.csv")
+# str(data)
+# dim(data)   # 4918   52
+data <- data[-1667, ]  # bad data  
+# separate the data into training data and testing data set
+4917 * 0.8   # 3933.6  
+set.seed(9999)
+i_train <- sample(1:4917, 3934, replace = F)
+data_test <- data[-i_train, ]
+data_train <- data[i_train, ]
+# dim(data_train)   # 3934  52
+
+# call Data_Processing function 
+data_train <- Data_Processing(data_train, model = 2)
+# dim(data_train)  # 3819  25
+
+# delete
+drops <- c("VISA_CLASS", "EMPLOYER_NAME", "NEW_EMPLOYMENT", "CONTINUED_EMPLOYMENT", "CHANGE_PREVIOUS_EMPLOYMENT", "NEW_CONCURRENT_EMPLOYMENT", "CHANGE_EMPLOYER", "AMENDED_PETITION", "FULL_TIME_POSITION", "PW_WAGE_LEVEL", "WILLFUL_VIOLATOR")
+data_train <- data_train[, !(names(data_train)%in%drops)]
+# dim(data_train)  # 3819  13   # 1_Y ~ 10_X + 2new_col
+
+#str(data_test)
+data_test <- Data_Processing(data_test, model = 2)
+drops <- c("VISA_CLASS", "EMPLOYER_NAME", "NEW_EMPLOYMENT", "CONTINUED_EMPLOYMENT", "CHANGE_PREVIOUS_EMPLOYMENT", "NEW_CONCURRENT_EMPLOYMENT", "CHANGE_EMPLOYER", "AMENDED_PETITION", "FULL_TIME_POSITION", "PW_WAGE_LEVEL", "WILLFUL_VIOLATOR")
+data_test <- data_test[, !(names(data_test)%in%drops)]
+#dim(data_test)  # 944  13
+length(which(data_test$CASE_STATUS == "CERTIFIED"))   # 571
+length(which(data_test$CASE_STATUS == "DENIED"))  # 373
+library(dplyr)
+
+
+#randomForest Model 
+library(randomForest)
+bag.h1b <- randomForest(CASE_STATUS~ EMPLOYER_STATE + AGENT_REPRESENTING_EMPLOYER + SOC_NAME + PREVAILING_WAGE + PW_SOURCE + PW_SOURCE_YEAR + WAGE_RATE_OF_PAY_FROM + WAGE_RATE_OF_PAY_TO + H1B_DEPENDENT + WORKSITE_STATE + Duration_Process + Duration_Employment + TOTAL_WORKERS, data = data_train, mtry = 13, importance = TRUE)
+yhat.bag <- predict(bag.h1b, newdata = data_test)
+summary(yhat.bag)
+plot(yhat.bag,data_test$CASE_STATUS) 
+table <- table(data_test$CASE_STATUS, yhat.bag)
+table
+
+library(gbm)
+data_train$Duration_Process <- as.numeric(data_train$Duration_Process)
+data_train$Duration_Employment <- as.numeric(data_train$Duration_Employment)
+data_train$CASE_STATUS <- as.numeric(data_train$CASE_STATUS) - 1
+
+bag.h1b_2 <- gbm(CASE_STATUS ~ EMPLOYER_STATE + AGENT_REPRESENTING_EMPLOYER + SOC_NAME + PREVAILING_WAGE + PW_SOURCE + PW_SOURCE_YEAR + WAGE_RATE_OF_PAY_FROM + WAGE_RATE_OF_PAY_TO + H1B_DEPENDENT + WORKSITE_STATE + Duration_Process + Duration_Employment + TOTAL_WORKERS, data = data_train, distribution = "bernoulli", n.trees = 100, interaction.depth = 13)
+summary(bag.h1b_2)
+
+data_test$Duration_Process <- as.numeric(data_test$Duration_Process)
+data_test$Duration_Employment <- as.numeric(data_test$Duration_Employment)
+data_test$CASE_STATUS <- as.numeric(data_test$CASE_STATUS)
+
+yhat.bag <- ifelse(predict(bag.h1b_2, newdata = data_test, n.trees = 100,type="response") < 0.5, "CERTIFIED", "DENIED")
+summary(yhat.bag)
+
+table <- table(data_test$CASE_STATUS, yhat.bag)
+table
+
+
+result <- importance(bag.h1b)
+dim(result)
+res <- result[, c(3, 4)]
+
+```
+
+
+
+
+```{r}
+# predict-----------------------------------------
+TestH1BLast_No_Y_values <- read.csv("TestH1BLast No Y values.csv")
+
+# process predicted data 
+data_predict <- Data_Processing(TestH1BLast_No_Y_values,model = 1)
+
+drops <- c("VISA_CLASS", "EMPLOYER_NAME","TOTAL_WORKERS", "NEW_EMPLOYMENT", "CONTINUED_EMPLOYMENT", "CHANGE_PREVIOUS_EMPLOYMENT", "NEW_CONCURRENT_EMPLOYMENT", "CHANGE_EMPLOYER", "AMENDED_PETITION", "FULL_TIME_POSITION", "PW_WAGE_LEVEL", "WILLFUL_VIOLATOR")
+data_predict <- data_predict[, !(names(data_predict)%in%drops)]
+
+data_predict$AGENT_REPRESENTING_EMPLOYER <-  as.factor(data_predict$AGENT_REPRESENTING_EMPLOYER)
+levels(data_predict$AGENT_REPRESENTING_EMPLOYER) <- levels(data_train$AGENT_REPRESENTING_EMPLOYER)
+
+data_predict$PW_SOURCE <- as.factor(data_predict$PW_SOURCE)
+levels(data_predict$PW_SOURCE) <- levels(data_train$PW_SOURCE)
+data_predict$H1B_DEPENDENT <- as.factor(data_predict$H1B_DEPENDENT)  
+levels(data_predict$H1B_DEPENDENT) <- levels(data_train$H1B_DEPENDENT)
+
+prediction <- ifelse(predict(bag.h1b_1, newdata = data_predict, n.trees = 100,type="response") < 0.5, "CERTIFIED", "DENIED")
+length(prediction)
+write.csv(prediction,"Predict_best_1.csv")
+
+
+# predict-----------------------------------------
+
+TestH1BLast_No_Y_values <- read.csv("TestH1BLast No Y values.csv")
+
+# process predicted data 
+data_predict <- Data_Processing(TestH1BLast_No_Y_values,model = 2)
+
+drops <- c("VISA_CLASS", "EMPLOYER_NAME", "NEW_EMPLOYMENT", "CONTINUED_EMPLOYMENT", "CHANGE_PREVIOUS_EMPLOYMENT", "NEW_CONCURRENT_EMPLOYMENT", "CHANGE_EMPLOYER", "AMENDED_PETITION", "FULL_TIME_POSITION", "PW_WAGE_LEVEL", "WILLFUL_VIOLATOR")
+data_predict <- data_predict[, !(names(data_predict)%in%drops)]
+
+data_predict$AGENT_REPRESENTING_EMPLOYER <- as.factor(data_predict$AGENT_REPRESENTING_EMPLOYER)
+levels(data_predict$AGENT_REPRESENTING_EMPLOYER) <- levels(data_train$AGENT_REPRESENTING_EMPLOYER)
+
+data_predict$PW_SOURCE <- as.factor(data_predict$PW_SOURCE)
+levels(data_predict$PW_SOURCE) <- levels(data_train$PW_SOURCE)
+data_predict$H1B_DEPENDENT <- as.factor(data_predict$H1B_DEPENDENT)  
+levels(data_predict$H1B_DEPENDENT) <- levels(data_train$H1B_DEPENDENT)
+
+prediction <- ifelse(predict(bag.h1b_2, newdata = data_predict, n.trees = 100,type="response") < 0.5, "CERTIFIED", "DENIED")
+length(prediction)
+write.csv(prediction,"Predict_best_2.csv")
+```
+
+
+
+
+
