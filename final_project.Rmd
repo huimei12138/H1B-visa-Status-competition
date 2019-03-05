@@ -1,6 +1,6 @@
 ---
 title: "stat101C_final_project"
-author: "GAMMA"
+author: "GAMMA(Huimei Huang, Yunuo Ma, Feishu Wu, Chen Zhang)"
 date: "8/2/2018"
 output: html_document
 ---
